@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Double eighth note (beamed) -->
+  <ellipse cx="14" cy="52" rx="10" ry="7" fill="currentColor"/>
+  <ellipse cx="46" cy="46" rx="10" ry="7" fill="currentColor"/>
+  <rect x="22" y="8" width="4" height="44" fill="currentColor"/>
+  <rect x="54" y="8" width="4" height="38" fill="currentColor"/>
+  <rect x="22" y="8" width="36" height="5" fill="currentColor"/>
+</svg>

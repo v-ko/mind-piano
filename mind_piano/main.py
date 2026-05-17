@@ -337,46 +337,6 @@ def _open_midi_port_for_app(config):
     return mido.open_input(input_names[choice])
 
 
-def _setup_tray(app, config, qml_window):
-    """System tray icon — click or right-click opens window."""
-    from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import QMenu, QStyle, QSystemTrayIcon
-
-    tray = QSystemTrayIcon(
-        app.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume), app)
-    tray.setToolTip("Mind Piano")
-
-    def _toggle_window():
-        if qml_window.isVisible():
-            qml_window.hide()
-        else:
-            qml_window.show()
-            qml_window.raise_()
-
-    # Left-click toggles the window
-    tray.activated.connect(lambda reason: _toggle_window()
-                           if reason == QSystemTrayIcon.ActivationReason.Trigger
-                           else None)
-
-    menu = QMenu()
-    show_action = QAction("Show Window", app)
-    show_action.triggered.connect(_toggle_window)
-    menu.addAction(show_action)
-
-    open_cfg = QAction("Open Config", app)
-    open_cfg.triggered.connect(
-        lambda: subprocess.Popen(["xdg-open", str(config.config_file)]))
-    menu.addAction(open_cfg)
-
-    quit_action = QAction("Quit", app)
-    quit_action.triggered.connect(app.quit)
-    menu.addAction(quit_action)
-
-    tray.setContextMenu(menu)
-    tray.show()
-    return tray
-
-
 def _run_app(config: Config):
     """Start the synth, tray icon, QML window, and MIDI loop."""
     from pathlib import Path
@@ -411,7 +371,27 @@ def _run_app(config: Config):
         sys.exit(1)
     qml_window = engine.rootObjects()[0]
 
-    tray = _setup_tray(app, config, qml_window)
+    from PySide6.QtWidgets import QSystemTrayIcon
+
+    from mind_piano.tray import TrayIcon, open_config_file
+
+    tray = TrayIcon(
+        app,
+        on_quit=app.quit,
+        on_open_config=lambda: open_config_file(config.config_file),
+    )
+
+    def _toggle_window():
+        if qml_window.isVisible():
+            qml_window.hide()
+        else:
+            qml_window.show()
+            qml_window.raise_()
+
+    tray._tray.activated.connect(
+        lambda reason: _toggle_window()
+        if reason == QSystemTrayIcon.ActivationReason.Trigger
+        else None)
 
     midi_thread = threading.Thread(
         target=mp.midi_event_retrieval_loop, daemon=True)

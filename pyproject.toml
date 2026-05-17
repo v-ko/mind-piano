@@ -23,4 +23,4 @@ build-backend = "setuptools.build_meta"
 packages = ["mind_piano"]
 
 [tool.setuptools.package-data]
-mind_piano = ["views/*.qml"]
+mind_piano = ["views/*.qml", "resources/*.svg"]
