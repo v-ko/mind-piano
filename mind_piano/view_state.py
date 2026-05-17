@@ -101,6 +101,8 @@ class AppViewState(QObject):
     current_strip_changed = Signal(int)
     master_gain_changed = Signal(float)
     strip_count_changed = Signal(int)
+    soundfont_name_changed = Signal(str)
+    preset_count_changed = Signal(int)
 
     def __init__(self, strip_count: int = 8, parent: QObject | None = None):
         super().__init__(parent)
@@ -113,6 +115,8 @@ class AppViewState(QObject):
         self._current_strip = 0
         self._master_gain = 2.0
         self._strip_count = strip_count
+        self._soundfont_name = ""
+        self._preset_count = 0
         self._strips: list[StripState] = [
             StripState(i, parent=self) for i in range(strip_count)
         ]
@@ -224,3 +228,25 @@ class AppViewState(QObject):
             return
         self._master_gain = value
         self.master_gain_changed.emit(value)
+
+    @Property(str, notify=soundfont_name_changed)
+    def soundfontName(self) -> str:
+        return self._soundfont_name
+
+    @soundfontName.setter
+    def soundfontName(self, value: str) -> None:
+        if self._soundfont_name == value:
+            return
+        self._soundfont_name = value
+        self.soundfont_name_changed.emit(value)
+
+    @Property(int, notify=preset_count_changed)
+    def presetCount(self) -> int:
+        return self._preset_count
+
+    @presetCount.setter
+    def presetCount(self, value: int) -> None:
+        if self._preset_count == value:
+            return
+        self._preset_count = value
+        self.preset_count_changed.emit(value)

@@ -6,11 +6,14 @@ ApplicationWindow {
     id: root
     title: "Mind Piano"
     width: 420
-    height: 560
+    minimumWidth: 320
+    minimumHeight: 400
+    height: mainLayout.implicitHeight + 24
     visible: true
     color: palette.window
 
     ColumnLayout {
+        id: mainLayout
         anchors.fill: parent
         anchors.margins: 12
         spacing: 8
@@ -67,6 +70,16 @@ ApplicationWindow {
                 color: palette.text
                 opacity: 0.7
             }
+        }
+
+        // ── Soundfont info ──────────────────────────────────────
+        Text {
+            Layout.fillWidth: true
+            text: appState ? appState.soundfontName + "  (" + appState.presetCount + " presets)" : ""
+            font.pixelSize: 11
+            color: palette.text
+            opacity: 0.5
+            elide: Text.ElideMiddle
         }
 
         // ── Playback phase bar ──────────────────────────────────

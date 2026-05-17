@@ -236,7 +236,7 @@ class MindPiano:
         """Select instrument for the current strip and play a preview."""
         if not self.presets:
             return
-        i = min(note, len(self.presets) - 1)
+        i = note % len(self.presets)
         ch = self.looper.current_strip
         p = self.presets[i]
         self.fs.program_select(ch, self.sfid, p["bank"], p["preset"])
@@ -358,6 +358,11 @@ def _run_app(config: Config):
 
     mp = MindPiano(config)
     mp.view_state = view_state
+
+    # Soundfont info for the UI
+    sf_path = config.soundfont_file
+    view_state.soundfontName = os.path.basename(sf_path) if sf_path else ""
+    view_state.presetCount = len(mp.presets)
 
     # QML engine
     engine = QQmlApplicationEngine()
