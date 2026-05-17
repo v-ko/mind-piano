@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Icon=emblem-music-symbolic
+Name=Mind Piano
+Exec=mind-piano
+Terminal=false
+Hidden=false

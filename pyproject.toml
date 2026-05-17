@@ -1,0 +1,26 @@
+[project]
+name = "mind-piano"
+version = "0.2"
+dependencies = [
+    "mido",
+    "pyfluidsynth",
+    "sf2utils",
+    "python-rtmidi",
+    "audioop-lts",
+    "PySide6",
+    "click",
+    "python-fusion>=0.10",
+]
+
+[project.scripts]
+mind-piano = "mind_piano.main:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["mind_piano"]
+
+[tool.setuptools.package-data]
+mind_piano = ["views/*.qml"]

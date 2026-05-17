@@ -1,0 +1,11 @@
+# Python related
+__pycache__/
+*.pyc
+*.egg
+*.egg-info
+dist/
+build/
+
+.vscode
+
+piano-work-log.md
