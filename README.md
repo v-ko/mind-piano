@@ -4,14 +4,12 @@ A multi-strip MIDI looper with SoundFont playback, metronome, and a QML visualiz
 
 ## Features
 
-- **Multi-strip looper** — record loops on independent strips, each with its own MIDI channel. The first recording sets the master loop duration; subsequent strips auto-quantize to it.
-- **Beat-based timing** — all events are stored in beats, not seconds. Tempo changes mid-recording are handled correctly.
-- **Instrument selection** — hold Modifier + press a piano key to select any SoundFont preset for the current strip. A preview triplet plays automatically.
-- **Metronome** — toggleable metronome on a dedicated GM drums channel, synced to the current BPM.
-- **Tempo control** — hold Modifier + move the mod wheel (CC 1) to set BPM (30–300).
-- **Master gain** — a dedicated fader controls FluidSynth's global gain (0–5).
-- **QML status window** — shows transport state, BPM, strip status (mute/recording/content), a looping phase bar, and a help panel. Runs as a tray app.
-- **Configurable bindings** — all buttons, faders, and transport controls are captured via an interactive wizard. Supports CC and program_change messages.
+- **Multi-strip looper** — record loops on independent strips with auto-quantization to the master loop length.
+- **Instrument selection** — switch SoundFont presets per strip via modifier + piano key.
+- **Metronome and tempo control** — built-in metronome, BPM adjustable from the controller.
+- **Master gain fader** — global volume control from a dedicated fader.
+- **Status window** — tray app with transport state, strip overview, and phase indicator.
+- **Configurable bindings** — interactive wizard captures all controls from your MIDI device.
 
 ## Setup
 
@@ -40,16 +38,10 @@ python install.py  # adds .desktop entry
 
 ## Usage
 
-Run the setup wizard to select your MIDI device and soundfont:
+Run the setup wizard to select your MIDI device, soundfont, and capture strip/transport bindings:
 
 ```bash
 mind-piano config setup
-```
-
-Capture strip and transport bindings:
-
-```bash
-mind-piano config keys
 ```
 
 Then launch:
@@ -61,6 +53,7 @@ mind-piano
 Other config commands:
 
 ```bash
+mind-piano config keys    # re-capture strip and transport bindings
 mind-piano config open    # open config.json in default editor
 mind-piano config delete  # remove the config file
 ```
@@ -81,8 +74,6 @@ A system tray icon lets you toggle the QML window, open the config, or quit.
 | `master_strip` | Index of the strip used as master (gain fader + metronome button) |
 
 ### MIDI controls
-
-All controls are configured via the `mind-piano config keys` wizard. Typical layout:
 
 - **Piano keys** — play on the current strip's channel
 - **Modifier (hold)** — enables secondary functions:
