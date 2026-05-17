@@ -63,6 +63,9 @@ class Strip:
         self.events: list[MidiEvent] = []
         self.muted: bool = False
         self.recording: bool = False
+        self.armed: bool = False
+        self.rec_start_beat: float = 0.0  # where overdub started in the loop
+        self._pre_overdub_count: int = 0  # for discard on stop
 
     @property
     def has_content(self) -> bool:
@@ -71,6 +74,19 @@ class Strip:
     def clear(self):
         self.events.clear()
         self.recording = False
+        self.armed = False
+        self.rec_start_beat = 0.0
+        self._pre_overdub_count = 0
+
+    def begin_overdub(self):
+        """Mark the start of an overdub pass (for discard)."""
+        self._pre_overdub_count = len(self.events)
+
+    def discard_overdub(self):
+        """Remove events added since the last begin_overdub."""
+        del self.events[self._pre_overdub_count:]
+        self.recording = False
+        self.armed = False
 
 
 class Looper:
@@ -97,6 +113,7 @@ class Looper:
         self._playback_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        self._auto_stop_timer: threading.Timer | None = None
 
         # Playback phase tracking — wall-clock ms epoch for each loop start
         self._loop_wall_start: float = 0.0      # monotonic
@@ -147,45 +164,81 @@ class Looper:
 
     # ── recording ────────────────────────────────────────────────
 
+    def current_loop_beats(self) -> float:
+        """Current beat position within the loop (0 .. master_duration)."""
+        if not self.playing or self.master_duration is None:
+            return 0.0
+        elapsed = time.monotonic() - self._loop_wall_start
+        elapsed_beats = elapsed * self.bpm / 60.0
+        return elapsed_beats % self.master_duration
+
     def toggle_record(self):
         strip = self.strips[self.current_strip]
-        if strip.recording:
-            self._stop_recording()
+        if strip.recording or strip.armed:
+            self._stop_recording()  # save
         else:
             self._start_recording()
 
     def _start_recording(self):
         strip = self.strips[self.current_strip]
+
+        if self.master_duration is None:
+            # First recording: arm and wait for first note
+            with self._lock:
+                strip.events.clear()
+                strip.armed = True
+                strip._pre_overdub_count = 0
+            log.info("Armed strip %d (%.0f BPM)", self.current_strip, self.bpm)
+        else:
+            # Overdub: start recording immediately at current loop position
+            start_beat = self.current_loop_beats()
+            with self._lock:
+                strip.begin_overdub()
+                strip.recording = True
+                strip.rec_start_beat = start_beat
+                self._rec_beat_acc = start_beat
+                self._rec_bpm = self.bpm
+                self._rec_wall_start = time.monotonic()
+            log.info("Recording (overdub) on strip %d at beat %.1f/%.1f",
+                     self.current_strip, start_beat, self.master_duration)
+
+    def _begin_recording(self, strip: Strip):
+        """Transition from armed → recording. Called on first note."""
         with self._lock:
-            strip.clear()
+            strip.armed = False
             strip.recording = True
+            strip._pre_overdub_count = 0
             self._rec_beat_acc = 0.0
             self._rec_bpm = self.bpm
             self._rec_wall_start = time.monotonic()
-        log.info("Recording on strip %d (%.0f BPM)", self.current_strip, self.bpm)
-
-        # If a master duration exists, schedule auto-stop
-        if self.master_duration is not None:
-            duration_secs = self._beats_to_seconds(self.master_duration)
-            threading.Timer(
-                duration_secs, self._auto_stop_recording,
-                args=[self.current_strip],
-            ).start()
+        log.info("Recording started on strip %d (%.0f BPM)",
+                 strip.index, self.bpm)
 
     def _stop_recording(self):
+        """Stop recording and save the events."""
+        self._cancel_auto_stop()
         strip = self.strips[self.current_strip]
         with self._lock:
+            if strip.armed:
+                # Was armed but never got a note — just cancel
+                strip.armed = False
+                log.info("Cancelled armed state on strip %d",
+                         self.current_strip)
+                return
             if not strip.recording:
                 return
             strip.recording = False
             duration_beats = self._current_rec_beats()
 
             if self.master_duration is None and strip.has_content:
-                self.master_duration = duration_beats
+                self.master_duration = round(duration_beats)
                 log.info("Master loop: %.1f beats (%.2fs at %.0f BPM)",
-                         duration_beats,
-                         self._beats_to_seconds(duration_beats),
+                         self.master_duration,
+                         self._beats_to_seconds(self.master_duration),
                          self.bpm)
+
+        # Clip existing strips if new master is shorter
+        self._clip_strips_to_master()
 
         log.info("Stopped recording on strip %d (%d events)",
                  self.current_strip, len(strip.events))
@@ -193,21 +246,56 @@ class Looper:
         if not self.playing:
             self.play()
 
+    def discard_recording(self):
+        """Discard events from the current recording/overdub pass."""
+        self._cancel_auto_stop()
+        strip = self.strips[self.current_strip]
+        with self._lock:
+            if strip.armed:
+                strip.armed = False
+                log.info("Cancelled armed state on strip %d",
+                         self.current_strip)
+                return
+            if not strip.recording:
+                return
+            strip.discard_overdub()
+            log.info("Discarded recording on strip %d", self.current_strip)
+
+    def _cancel_auto_stop(self):
+        if self._auto_stop_timer is not None:
+            self._auto_stop_timer.cancel()
+            self._auto_stop_timer = None
+
     def _auto_stop_recording(self, strip_index: int):
         strip = self.strips[strip_index]
         if strip.recording:
-            log.info("Auto-stop recording on strip %d", strip_index)
+            elapsed = self._current_rec_beats()
+            log.info("Auto-stop recording on strip %d "
+                     "(elapsed %.1f beats, master %.1f)",
+                     strip_index, elapsed,
+                     self.master_duration or 0)
             prev = self.current_strip
             self.current_strip = strip_index
             self._stop_recording()
             self.current_strip = prev
+        else:
+            log.debug("Auto-stop ignored on strip %d (not recording)",
+                      strip_index)
 
     def record_note(self, msg):
         """Called from the MIDI thread for note_on / note_off."""
         strip = self.strips[self.current_strip]
+
+        # Armed → start recording on first note_on
+        if strip.armed and msg.type == "note_on" and msg.velocity > 0:
+            self._begin_recording(strip)
+
         if not strip.recording:
             return
         beat_time = self._current_rec_beats()
+        # Wrap overdub events within the master loop
+        if self.master_duration is not None:
+            beat_time = beat_time % self.master_duration
         event = MidiEvent.from_mido(msg, beat_time, self.current_strip)
         with self._lock:
             strip.events.append(event)
@@ -231,6 +319,42 @@ class Looper:
                 log.info("Selected strip %d", i)
                 return
         log.info("No empty strips available")
+
+    # ── clear / reset ────────────────────────────────────────────
+
+    def clear_strip(self, strip_index: int):
+        """Clear all events from a strip."""
+        if strip_index < 0 or strip_index >= len(self.strips):
+            return
+        strip = self.strips[strip_index]
+        with self._lock:
+            strip.clear()
+        self._silence_strip(strip_index)
+        log.info("Cleared strip %d", strip_index)
+
+        # If no strips have content, reset master
+        if not any(s.has_content for s in self.strips):
+            self.stop()
+            self.master_duration = None
+            log.info("All strips empty — master duration reset")
+
+    def reset_master(self):
+        """Clear master duration. Next recording will set a new one."""
+        self.stop()
+        old = self.master_duration
+        self.master_duration = None
+        log.info("Master duration reset (was %.1f beats)",
+                 old if old else 0.0)
+
+    def _clip_strips_to_master(self):
+        """Remove events beyond master_duration from all strips."""
+        if self.master_duration is None:
+            return
+        for strip in self.strips:
+            with self._lock:
+                strip.events = [
+                    e for e in strip.events if e.time < self.master_duration
+                ]
 
     # ── metronome ────────────────────────────────────────────────
 
@@ -286,6 +410,14 @@ class Looper:
                  self.master_duration, self.bpm)
 
     def stop(self):
+        # Cancel any pending auto-stop and discard active recordings
+        self._cancel_auto_stop()
+        for strip in self.strips:
+            if strip.recording or strip.armed:
+                with self._lock:
+                    strip.discard_overdub()
+                log.info("Discarded recording on strip %d", strip.index)
+
         if not self.playing:
             return
         self.playing = False
@@ -308,7 +440,7 @@ class Looper:
             with self._lock:
                 schedule = []
                 for strip in self.strips:
-                    if strip.muted or not strip.has_content:
+                    if not strip.has_content:
                         continue
                     for ev in strip.events:
                         schedule.append(ev)
@@ -334,7 +466,7 @@ class Looper:
                         return
 
                 strip = self.strips[ev.channel]
-                if strip.muted:
+                if strip.muted or not strip.has_content:
                     continue
                 self._fire_event(ev)
 

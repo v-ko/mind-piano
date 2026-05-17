@@ -50,6 +50,7 @@ ApplicationWindow {
                 text: {
                     if (!appState) return ""
                     if (appState.recording) return "⏺ REC"
+                    if (appState.armed) return "⏺ ARM"
                     if (appState.playing) return "▶ PLAY"
                     return "⏹ STOP"
                 }
@@ -58,6 +59,7 @@ ApplicationWindow {
                 color: {
                     if (!appState) return palette.text
                     if (appState.recording) return "#F44336"
+                    if (appState.armed) return "#FF9800"
                     if (appState.playing) return "#4CAF50"
                     return palette.mid
                 }
@@ -83,36 +85,66 @@ ApplicationWindow {
         }
 
         // ── Playback phase bar ──────────────────────────────────
-        Rectangle {
+        RowLayout {
             Layout.fillWidth: true
-            height: 6
-            radius: 3
-            color: palette.mid
-            clip: true
+            spacing: 8
 
             Rectangle {
-                id: phaseBar
-                height: parent.height
+                Layout.fillWidth: true
+                height: 6
                 radius: 3
-                color: appState && appState.playing ? "#64B5F6" : palette.mid
-                width: 0
+                color: palette.mid
+                clip: true
+                Layout.alignment: Qt.AlignVCenter
 
-                // Re-derive phase from loopEpoch + loopDuration
-                Timer {
-                    interval: 33  // ~30 fps
-                    repeat: true
-                    running: appState ? appState.playing : false
-                    onTriggered: {
-                        if (!appState || appState.loopDuration <= 0) {
-                            phaseBar.width = 0
-                            return
+                Rectangle {
+                    id: phaseBar
+                    height: parent.height
+                    radius: 3
+                    color: appState && appState.playing ? "#64B5F6" : palette.mid
+                    width: 0
+
+                    Timer {
+                        interval: 33
+                        repeat: true
+                        running: appState ? appState.playing : false
+                        onTriggered: {
+                            if (!appState || appState.loopDuration <= 0) {
+                                phaseBar.width = 0
+                                return
+                            }
+                            let elapsed = Date.now() - appState.loopEpoch
+                            let phase = (elapsed / (appState.loopDuration * 1000)) % 1.0
+                            if (phase < 0) phase = 0
+                            phaseBar.width = phaseBar.parent.width * phase
                         }
-                        let elapsed = Date.now() - appState.loopEpoch
-                        let phase = (elapsed / (appState.loopDuration * 1000)) % 1.0
-                        if (phase < 0) phase = 0
-                        phaseBar.width = phaseBar.parent.width * phase
                     }
                 }
+
+                // Recording start marker
+                Rectangle {
+                    id: recStartMarker
+                    property var cs: appState ? appState.getStrip(appState.currentStrip) : null
+                    visible: cs ? cs.recording && cs.recStartPhase > 0.001 : false
+                    x: cs ? parent.width * cs.recStartPhase : 0
+                    width: 2
+                    height: parent.height
+                    color: "#F44336"
+                    radius: 1
+                }
+            }
+
+            Text {
+                visible: appState ? appState.loopDuration > 0 : false
+                text: {
+                    if (!appState || appState.loopDuration <= 0) return ""
+                    let beats = Math.round(appState.loopDuration * appState.bpm / 60)
+                    let secs = appState.loopDuration.toFixed(1)
+                    return beats + "b / " + secs + "s"
+                }
+                font.pixelSize: 11
+                color: palette.text
+                opacity: 0.4
             }
         }
 
@@ -175,6 +207,17 @@ ApplicationWindow {
                         Layout.fillWidth: true
                     }
 
+                    // Volume %
+                    Text {
+                        property var s: appState ? appState.getStrip(index) : null
+                        text: s ? Math.round(s.volume / 127.0 * 100) + "%" : ""
+                        font.pixelSize: 11
+                        color: palette.text
+                        opacity: s && s.volume < 127 ? 0.7 : 0.3
+                        Layout.preferredWidth: 30
+                        horizontalAlignment: Text.AlignRight
+                    }
+
                     // Content indicator
                     Rectangle {
                         width: 8; height: 8; radius: 4
@@ -195,13 +238,24 @@ ApplicationWindow {
                         Layout.preferredWidth: 14
                     }
 
-                    // Recording indicator
+                    // Recording / armed indicator
                     Text {
+                        id: recIndicator
                         property var s: appState ? appState.getStrip(index) : null
-                        text: s && s.recording ? "●" : ""
+                        text: s && s.recording ? "●" : (s && s.armed ? "○" : "")
                         font.pixelSize: 14
                         color: "#F44336"
                         Layout.preferredWidth: 14
+                        // Blink when armed
+                        opacity: s && s.armed && !s.recording ? blinkAnim.opacity : 1.0
+                        NumberAnimation on opacity {
+                            id: blinkAnim
+                            running: recIndicator.s && recIndicator.s.armed && !recIndicator.s.recording
+                            loops: Animation.Infinite
+                            from: 1.0; to: 0.2
+                            duration: 600
+                            easing.type: Easing.InOutSine
+                        }
                     }
                 }
             }
@@ -220,13 +274,17 @@ ApplicationWindow {
             Layout.fillHeight: true
             text: "<b>Controls</b><br>" +
                   "<b>Strip buttons</b> — mute/unmute<br>" +
+                  "<b>Strip faders</b> — per-strip volume<br>" +
                   "<b>Modifier + strip button</b> — select strip<br>" +
                   "<b>Modifier + piano key</b> — change instrument<br>" +
                   "<b>Modifier + mod wheel</b> — set tempo<br>" +
                   "<b>Master strip button</b> — toggle metronome<br>" +
                   "<b>Master fader</b> — master volume<br>" +
-                  "<b>Record</b> — start/stop recording<br>" +
-                  "<b>Play / Stop</b> — transport"
+                  "<b>Record</b> — toggle overdub (save on 2nd press)<br>" +
+                  "<b>Modifier + Record</b> — reset master loop length<br>" +
+                  "<b>Stop</b> — stop playback (discards active recording)<br>" +
+                  "<b>Modifier + Stop</b> — clear current strip<br>" +
+                  "<b>Play</b> — start playback"
             font.pixelSize: 11
             color: palette.text
             opacity: 0.6

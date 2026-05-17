@@ -17,8 +17,11 @@ class StripState(QObject):
     instrument_changed = Signal(str)
     muted_changed = Signal(bool)
     recording_changed = Signal(bool)
+    armed_changed = Signal(bool)
+    rec_start_phase_changed = Signal(float)
     has_content_changed = Signal(bool)
     is_current_changed = Signal(bool)
+    volume_changed = Signal(int)
 
     def __init__(self, index: int, parent: QObject | None = None):
         super().__init__(parent)
@@ -26,8 +29,11 @@ class StripState(QObject):
         self._instrument = "Piano"
         self._muted = False
         self._recording = False
+        self._armed = False
+        self._rec_start_phase = 0.0
         self._has_content = False
         self._is_current = index == 0
+        self._volume = 127
 
     @Property(int, notify=index_changed)
     def index(self) -> int:
@@ -66,6 +72,28 @@ class StripState(QObject):
         self._recording = value
         self.recording_changed.emit(value)
 
+    @Property(bool, notify=armed_changed)
+    def armed(self) -> bool:
+        return self._armed
+
+    @armed.setter
+    def armed(self, value: bool) -> None:
+        if self._armed == value:
+            return
+        self._armed = value
+        self.armed_changed.emit(value)
+
+    @Property(float, notify=rec_start_phase_changed)
+    def recStartPhase(self) -> float:
+        return self._rec_start_phase
+
+    @recStartPhase.setter
+    def recStartPhase(self, value: float) -> None:
+        if abs(self._rec_start_phase - value) < 0.001:
+            return
+        self._rec_start_phase = value
+        self.rec_start_phase_changed.emit(value)
+
     @Property(bool, notify=has_content_changed)
     def has_content(self) -> bool:
         return self._has_content
@@ -88,6 +116,17 @@ class StripState(QObject):
         self._is_current = value
         self.is_current_changed.emit(value)
 
+    @Property(int, notify=volume_changed)
+    def volume(self) -> int:
+        return self._volume
+
+    @volume.setter
+    def volume(self, value: int) -> None:
+        if self._volume == value:
+            return
+        self._volume = value
+        self.volume_changed.emit(value)
+
 
 class AppViewState(QObject):
     """Top-level observable state for the entire app."""
@@ -96,6 +135,7 @@ class AppViewState(QObject):
     metronome_on_changed = Signal(bool)
     playing_changed = Signal(bool)
     recording_changed = Signal(bool)
+    armed_changed = Signal(bool)
     loop_duration_changed = Signal(float)
     loop_epoch_changed = Signal(float)
     current_strip_changed = Signal(int)
@@ -103,6 +143,7 @@ class AppViewState(QObject):
     strip_count_changed = Signal(int)
     soundfont_name_changed = Signal(str)
     preset_count_changed = Signal(int)
+    midi_connected_changed = Signal(bool)
 
     def __init__(self, strip_count: int = 8, parent: QObject | None = None):
         super().__init__(parent)
@@ -110,6 +151,7 @@ class AppViewState(QObject):
         self._metronome_on = False
         self._playing = False
         self._recording = False
+        self._armed = False
         self._loop_duration = 0.0   # seconds
         self._loop_epoch = 0.0      # JS Date.now()-compatible ms timestamp
         self._current_strip = 0
@@ -117,6 +159,7 @@ class AppViewState(QObject):
         self._strip_count = strip_count
         self._soundfont_name = ""
         self._preset_count = 0
+        self._midi_connected = False
         self._strips: list[StripState] = [
             StripState(i, parent=self) for i in range(strip_count)
         ]
@@ -178,6 +221,17 @@ class AppViewState(QObject):
             return
         self._recording = value
         self.recording_changed.emit(value)
+
+    @Property(bool, notify=armed_changed)
+    def armed(self) -> bool:
+        return self._armed
+
+    @armed.setter
+    def armed(self, value: bool) -> None:
+        if self._armed == value:
+            return
+        self._armed = value
+        self.armed_changed.emit(value)
 
     @Property(float, notify=loop_duration_changed)
     def loopDuration(self) -> float:
@@ -250,3 +304,14 @@ class AppViewState(QObject):
             return
         self._preset_count = value
         self.preset_count_changed.emit(value)
+
+    @Property(bool, notify=midi_connected_changed)
+    def midiConnected(self) -> bool:
+        return self._midi_connected
+
+    @midiConnected.setter
+    def midiConnected(self, value: bool) -> None:
+        if self._midi_connected == value:
+            return
+        self._midi_connected = value
+        self.midi_connected_changed.emit(value)

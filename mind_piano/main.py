@@ -31,6 +31,7 @@ def sync_view_state(vs, mp):
     vs.metronomeOn = looper._metronome_on
     vs.playing = looper.playing
     vs.recording = any(s.recording for s in looper.strips)
+    vs.armed = any(s.armed for s in looper.strips)
     vs.currentStrip = looper.current_strip
     vs.masterGain = mp.master_gain
     vs.loopDuration = looper._loop_duration_secs
@@ -42,8 +43,14 @@ def sync_view_state(vs, mp):
         ss = vs.strip(i)
         ss.muted = strip.muted
         ss.recording = strip.recording
+        ss.armed = strip.armed
+        if strip.recording and looper.master_duration:
+            ss.recStartPhase = strip.rec_start_beat / looper.master_duration
+        else:
+            ss.recStartPhase = 0.0
         ss.has_content = strip.has_content
         ss.instrument = mp.strip_instruments[i]
+        ss.volume = mp.strip_volumes[i]
 
 
 class MindPiano:
@@ -70,12 +77,16 @@ class MindPiano:
 
         # ── Binding lookup tables ────────────────────────────────
         self._strip_button_to_index: dict[tuple, int] = {}
+        self._strip_fader_cc_to_index: dict[int, int] = {}
         for i, strip in enumerate(config.strips):
             if i == self._master_strip:
-                continue  # master strip button handled separately
+                continue  # master strip handled separately
             btn = strip.get("button", {})
             key = (btn.get("type", "cc"), btn.get("number"))
             self._strip_button_to_index[key] = i
+            fader = strip.get("fader", {})
+            if fader.get("type", "cc") == "cc" and fader.get("number") is not None:
+                self._strip_fader_cc_to_index[fader["number"]] = i
 
         transport = config.transport
         self._binding_record = _binding_key(transport.get("record"))
@@ -114,6 +125,7 @@ class MindPiano:
         # Per-strip instrument names (written by MIDI thread, read by UI timer)
         default_name = self.presets[0].get("name", "Piano") if self.presets else "Piano"
         self.strip_instruments: list[str] = [default_name] * strip_count
+        self.strip_volumes: list[int] = [127] * strip_count  # CC 7 per channel
         self.master_gain: float = config.synth_gain
 
     # ── MIDI event routing ───────────────────────────────────────
@@ -186,6 +198,15 @@ class MindPiano:
             log.debug("Master gain → %.2f", gain)
             return
 
+        # ── Strip faders: per-channel volume (CC 7) ──────────────
+        if (msg.type == "control_change"
+                and msg.control in self._strip_fader_cc_to_index):
+            idx = self._strip_fader_cc_to_index[msg.control]
+            self.fs.cc(idx, 7, msg.value)
+            self.strip_volumes[idx] = msg.value
+            log.debug("Strip %d volume → %d", idx, msg.value)
+            return
+
         # ── Modifier held + mod wheel (CC 1): set tempo ─────────
         if (self._modifier_held
                 and msg.type == "control_change"
@@ -198,7 +219,10 @@ class MindPiano:
         if key == self._binding_record:
             if msg.type == "control_change" and msg.value == 127:
                 return  # act on release
-            self.looper.toggle_record()
+            if self._modifier_held:
+                self.looper.reset_master()
+            else:
+                self.looper.toggle_record()
 
         elif key == self._binding_play:
             if msg.type == "control_change" and msg.value == 127:
@@ -208,7 +232,10 @@ class MindPiano:
         elif key == self._binding_stop:
             if msg.type == "control_change" and msg.value == 127:
                 return
-            self.looper.stop()
+            if self._modifier_held:
+                self.looper.clear_strip(self.looper.current_strip)
+            else:
+                self.looper.stop()
 
         elif key in self._strip_button_to_index:
             if msg.type == "control_change" and msg.value == 127:
